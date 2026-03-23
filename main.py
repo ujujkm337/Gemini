@@ -1,18 +1,22 @@
 import os
-import requests
+import google.generativeai as genai
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Твой рабочий ключ
+# Твой ключ
 API_KEY = "AIzaSyDiiGeoRBtat0Hjt1YWgRzg6f2MyTwMnM8"
 
-# Актуальный URL для Gemini 1.5 Flash
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+# Настраиваем SDK
+genai.configure(api_key=API_KEY)
+
+# Выбираем модель. 
+# В документации 2026 года 'gemini-1.5-flash' - это стандарт.
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 @app.route('/')
 def home():
-    return "✅ Gemini Bridge is Active"
+    return "✅ Gemini Official SDK Bridge is Online"
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -21,39 +25,29 @@ def chat():
         user_text = data.get('text', '')
 
         if not user_text:
-            return jsonify({"reply": "Пустой запрос"}), 400
+            return jsonify({"reply": "Запрос пуст"}), 400
 
-        # Формируем заголовки и тело запроса
-        headers = {
-            "Content-Type": "application/json",
-            "x-goog-api-key": API_KEY
-        }
+        # Генерация контента через официальный метод
+        response = model.generate_content(user_text)
         
-        payload = {
-            "contents": [{
-                "parts": [{"text": user_text}]
-            }]
-        }
-
-        # Прямой запрос к Google
-        response = requests.post(GEMINI_URL, headers=headers, json=payload, timeout=30)
-        result = response.json()
-
-        # Если Google вернул ошибку (например, 404 или 403)
-        if response.status_code != 200:
-            error_msg = result.get('error', {}).get('message', 'Unknown Error')
-            return jsonify({"reply": f"Google Error {response.status_code}: {error_msg}"}), 200
-
-        # Извлекаем текст
-        try:
-            answer = result['candidates'][0]['content']['parts'][0]['text']
+        # Проверка, не заблокировал ли Google ответ (Safety Ratings)
+        if response.candidates:
+            answer = response.text
             return jsonify({"reply": answer})
-        except (KeyError, IndexError):
-            return jsonify({"reply": f"Ошибка обработки: {str(result)}"}), 200
+        else:
+            return jsonify({"reply": "Google заблокировал ответ из-за настроек безопасности или пустого результата."}), 200
 
     except Exception as e:
-        return jsonify({"reply": f"Ошибка сервера: {str(e)}"}), 200
+        error_str = str(e)
+        # Если всё же 404 или 403 - выводим понятный текст
+        if "404" in error_str:
+            return jsonify({"reply": "Ошибка 404: Модель не найдена. Попробуй сменить регион в Render на Frankfurt."}), 200
+        if "location" in error_str.lower():
+            return jsonify({"reply": "Ошибка региона: Google не работает в текущем регионе сервера. Смени регион в настройках Render на Frankfurt."}), 200
+            
+        return jsonify({"reply": f"Ошибка SDK: {error_str}"}), 200
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
+    # Render передает порт через переменную окружения
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
