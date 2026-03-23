@@ -1,22 +1,18 @@
 import os
-import google.generativeai as genai
+import requests
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Твой НОВЫЙ ключ
+# Твой рабочий ключ
 API_KEY = "AIzaSyDiiGeoRBtat0Hjt1YWgRzg6f2MyTwMnM8"
 
-# Настройка модели
-try:
-    genai.configure(api_key=API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-except Exception as e:
-    print(f"Ошибка инициализации: {e}")
+# Используем стабильную версию v1 вместо v1beta
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={API_KEY}"
 
 @app.route('/')
 def home():
-    return "✅ Gemini Proxy is Online!"
+    return "✅ Proxy is Ready"
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -24,22 +20,31 @@ def chat():
         data = request.get_json()
         user_text = data.get('text', '')
 
-        if not user_text:
-            return jsonify({"reply": "Ошибка: Пустой запрос"}), 400
+        # Структура запроса для Gemini v1
+        payload = {
+            "contents": [{
+                "parts": [{"text": user_text}]
+            }]
+        }
 
-        # Запрос к Google
-        response = model.generate_content(user_text)
-        
-        if response and response.text:
-            return jsonify({"reply": response.text})
-        else:
-            return jsonify({"reply": "Gemini не смог сформировать ответ."}), 500
+        # Отправляем запрос
+        response = requests.post(GEMINI_URL, json=payload, timeout=30)
+        result = response.json()
+
+        # Проверка на ошибки от Google
+        if response.status_code != 200:
+            error_msg = result.get('error', {}).get('message', 'Unknown Error')
+            return jsonify({"reply": f"Google Error {response.status_code}: {error_msg}"}), 200
+
+        # Извлекаем ответ нейросети
+        try:
+            answer = result['candidates'][0]['content']['parts'][0]['text']
+            return jsonify({"reply": answer})
+        except (KeyError, IndexLocal) as e:
+            return jsonify({"reply": f"Ошибка парсинга ответа: {str(result)}"}), 200
 
     except Exception as e:
-        error_msg = str(e)
-        print(f"Критическая ошибка: {error_msg}")
-        # Возвращаем 200 с текстом ошибки, чтобы приложение в AIDE не вылетало по 500
-        return jsonify({"reply": f"Ошибка сервера: {error_msg}"}), 200
+        return jsonify({"reply": f"Ошибка прокси: {str(e)}"}), 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
